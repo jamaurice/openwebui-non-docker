@@ -1,80 +1,66 @@
-# 🧠 Open WebUI – Manual Deployment (Non-Docker)
+# 🧠 Open WebUI – Manual Setup Without Docker
 
-A lightweight local-first web-based UI for running LLMs via Ollama. This setup runs completely outside Docker and is optimized for high-memory servers.
-
----
-
-## ✅ Requirements
-
-- Python 3.10+ (preferably 3.11+ to support `StrEnum`)
-- Node.js (v18+)
-- npm
-- `virtualenv`
+This guide walks you through deploying Open WebUI **without Docker**, fixing common compatibility issues, and running it cleanly on your own infrastructure.
 
 ---
 
-## 🧩 Setup Overview
+## 📦 Overview
 
-This guide helps you:
+**Goal**: Run Open WebUI directly using FastAPI + SvelteKit **without Docker or containerization**, fully self-hosted.
 
-1. Manually configure and run the backend using FastAPI (uvicorn).
-2. Build the frontend using Vite/SvelteKit.
-3. Avoid Docker entirely.
-4. Enable large model builds on 64GB+ RAM environments.
+**Environment**:
+- OS: Ubuntu 22.04+ (or similar)
+- RAM: 16GB minimum (32GB+ preferred for build)
+- Disk: 2GB free for dependencies + swap
+- Internet access during setup
 
 ---
 
-## 🔧 Manual Setup
+## ✅ Requirements & Manual Installs
 
-### 1. Clone the repo and navigate:
+Install the following system dependencies:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/open-webui.git
-cd open-webui
+sudo apt update
+sudo apt install -y \
+  git curl wget unzip \
+  build-essential python3.10 python3.10-venv python3-pip \
+  nodejs npm
 ````
 
-### 2. Create a Python virtual environment:
+> If Node.js version is too old (check with `node -v`), use:
 
 ```bash
-cd backend
-python3 -m venv venv
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+---
+
+## 🧪 Python Virtual Environment Setup
+
+```bash
+cd open-webui/backend
+python3.10 -m venv venv
 source venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3. Build frontend (from root of repo):
-
-```bash
-chmod +x build.sh
-./build.sh
-```
-
-This script will:
-
-* Clean `.svelte-kit` and Vite cache
-* Set `--max-old-space-size=8192` for large frontend builds
-* Allocate 8GB swap if missing
-* Run `npm install` and `npm run build`
-
 ---
 
-## 🛠️ Modified Files
+## 🛠️ Modifications Required to Run Successfully
 
-To get Open WebUI running outside Docker, the following files were updated:
+### 1. ❌ Python 3.10 lacks `StrEnum`
 
-### ✅ `backend/open_webui/env.py`
+**File**: `open_webui/retrieval/vector/type.py`
 
-```python
-# Fixed invalid attribute:
-# Replaced: logging.getLevelNamesMapping()
-# With fallback or removed if unnecessary for your use case
-```
-
-### ✅ `backend/open_webui/retrieval/vector/type.py`
+🔧 **Fix**:
 
 ```python
-# Replaced Python 3.11+ only import:
+# Replace:
 # from enum import StrEnum
+
 # With:
 from enum import Enum
 class StrEnum(str, Enum):
@@ -83,19 +69,49 @@ class StrEnum(str, Enum):
 
 ---
 
-## ▶️ Running Backend
+### 2. ❌ `logging.getLevelNamesMapping()` is missing in 3.10
 
-```bash
-cd backend
-source venv/bin/activate
-python3 -m uvicorn open_webui.main:app --host 0.0.0.0 --port 3000
+**File**: `open_webui/env.py` and possibly `utils/logger.py`
+
+🔧 **Fix**:
+
+```python
+# Old (incompatible):
+if SRC_LOG_LEVELS[source] not in logging.getLevelNamesMapping():
+
+# Replace with a fallback check like:
+valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+if SRC_LOG_LEVELS[source] not in valid_levels:
+    ...
 ```
-
-Now access: [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## 🔁 build.sh Reference
+### 3. ✅ Make sure FastAPI entry point loads correctly
+
+**File**: `open_webui/main.py`
+
+Verify last line is:
+
+```python
+app = create_app()
+```
+
+Then run:
+
+```bash
+python3 -m uvicorn open_webui.main:app --host 0.0.0.0 --port 3000
+```
+
+---
+
+## 🧼 `build.sh` Script to Handle Frontend + Memory Issues
+
+Create a file in the project root named `build.sh`:
+
+```bash
+chmod +x build.sh
+```
 
 ```bash
 #!/bin/bash
@@ -116,6 +132,8 @@ if ! grep -q '/swapfile' /etc/fstab; then
   sudo mkswap /swapfile
   sudo swapon /swapfile
   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+else
+  echo "Swap file already exists."
 fi
 
 echo "🚀 Running npm install..."
@@ -129,15 +147,88 @@ echo "✅ Build complete!"
 
 ---
 
-## 🧠 Notes
+## 🔁 Run the App
 
-* Make sure NodeJS has at least 8GB heap or large builds will fail with OOM errors.
-* This setup is ideal for **bare-metal servers** with high RAM allocations.
+```bash
+cd backend
+source venv/bin/activate
+python3 -m uvicorn open_webui.main:app --host 0.0.0.0 --port 3000
+```
+
+Access it at: [http://localhost:3000](http://localhost:3000)
+
+---
+
+## 🗂️ List of Manually Modified Files
+
+| File Path                                     | Modification                                                                |
+| --------------------------------------------- | --------------------------------------------------------------------------- |
+| `backend/open_webui/env.py`                   | Replaced `logging.getLevelNamesMapping()` with safe fallback logic          |
+| `backend/open_webui/utils/logger.py`          | Same logging compatibility fix (if used there)                              |
+| `backend/open_webui/retrieval/vector/type.py` | Added `StrEnum` compatibility patch for Python 3.10                         |
+| `build.sh` (custom)                           | Added swap creation, heap allocation, clean build script for large frontend |
+
+---
+
+## 🔐 Not Using Docker or Cloudflare
+
+This deployment skips:
+
+* Docker
+* Docker Compose
+* Any Cloudflare Tunnels or config files
+
+You manage access yourself using:
+
+* Reverse proxy (e.g., NGINX)
+* TLS certs (e.g., Let’s Encrypt)
+* Systemd service
+
+---
+
+## 🧠 Optional: Add to systemd
+
+If you want to run it at boot:
+
+```ini
+# /etc/systemd/system/openwebui.service
+[Unit]
+Description=Open WebUI Backend Service
+After=network.target
+
+[Service]
+Type=simple
+User=user-name
+WorkingDirectory=/home/user-name/open-webui/backend
+ExecStart=/home/user-name/open-webui/backend/venv/bin/python3 -m uvicorn open_webui.main:app --host 0.0.0.0 --port 3000
+Restart=on-failure
+Environment=OLLAMA_API_BASE_URL=http://127.0.0.1:11434
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable:
+
+```bash
+sudo systemctl daemon-reexec
+sudo systemctl enable openwebui
+sudo systemctl start openwebui
+```
+
+---
+
+## ✅ Final Checklist
+
+* [x] Python venv initialized
+* [x] Dependencies installed
+* [x] `StrEnum` patched
+* [x] Logging fixed
+* [x] Frontend built with memory limits
+* [x] Backend launched via `uvicorn`
 
 ---
 
 ## 📜 License
 
 MIT
-
-```
